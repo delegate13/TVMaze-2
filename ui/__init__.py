@@ -1,1 +1,1 @@
-"""Desktop presentation layer for the TVMaze Show Finder."""
+"""Desktop presentation layer for Media Finder."""

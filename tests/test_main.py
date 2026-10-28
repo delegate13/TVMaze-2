@@ -52,7 +52,9 @@ def test_main_opens_desktop_interface_by_default(configured_cli, monkeypatch):
     launched = []
     monkeypatch.setattr(
         "ui.show_finder_window.launch_show_finder",
-        lambda config, logger: launched.append((config, logger)),
+        lambda config, logger, search_service: launched.append(
+            (config, logger, search_service)
+        ),
     )
 
     assert application.main([]) == 0
@@ -68,7 +70,7 @@ def test_main_keeps_cli_available_with_explicit_flag(configured_cli, capsys):
 def test_main_filters_search_results(configured_cli, capsys):
     """Apply a valid optional rating threshold before rendering results."""
     assert application.main(["Example", "--min-rating", "9"]) == 0
-    assert "No shows matched" in capsys.readouterr().out
+    assert "No media items matched" in capsys.readouterr().out
 
 
 def test_main_reports_application_errors(configured_cli, monkeypatch, capsys):

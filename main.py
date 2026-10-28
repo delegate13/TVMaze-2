@@ -1,4 +1,4 @@
-"""Application entry point for the TVMaze Show Finder."""
+"""Application entry point for Media Finder."""
 
 from __future__ import annotations
 
@@ -9,31 +9,56 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from services.configuration_service import ApplicationConfig, ConfigurationService
-from services.show_filter_service import ShowFilterService
+from services.media_discovery_service import (
+    MediaDiscoveryService,
+    TVMazeMediaProvider,
+)
+from services.media_providers import (
+    ImdbDatasetProvider,
+    SimklProvider,
+    TmdbProvider,
+    TraktProvider,
+)
 from services.tvmaze_service import TVMazeService
+from utils.application_paths import get_default_config_path, get_log_file_path
 from utils.exceptions import ApplicationError
-from utils.json_explainer import explain_shows
+from utils.json_explainer import explain_media_items
 from utils.logger import configure_logging
-from utils.validators import validate_rating_threshold, validate_search_term
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "config.json"
-DEFAULT_LOG_PATH = PROJECT_ROOT / "logs" / "application.log"
+DEFAULT_CONFIG_PATH = get_default_config_path()
+DEFAULT_LOG_PATH = get_log_file_path()
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
     """Create the command-line parser for the application."""
     parser = argparse.ArgumentParser(
-        description="Search TVMaze for television shows and filter by rating."
+        description="Discover movies, television shows, and episodes across catalogs."
     )
     parser.add_argument(
         "search_term",
         nargs="?",
-        help="show title or search phrase (prompted when omitted)",
+        help="search phrase (prompted when omitted)",
     )
     parser.add_argument(
         "--min-rating",
         help="optional minimum rating from 0 to 10",
+    )
+    parser.add_argument(
+        "--source",
+        choices=("TVMaze", "TMDB", "Trakt", "Simkl", "IMDb"),
+        default="TVMaze",
+        help="catalog provider for CLI searches (default: TVMaze)",
+    )
+    parser.add_argument(
+        "--media-type",
+        choices=("movie", "show", "episode"),
+        default="show",
+        help="catalog category to search (default: show)",
+    )
+    parser.add_argument(
+        "--top-movies",
+        action="store_true",
+        help="list the top 100 movies from TMDB or IMDb",
     )
     parser.add_argument(
         "--config",
@@ -64,10 +89,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             not arguments.cli
             and arguments.search_term is None
             and arguments.min_rating is None
+            and not arguments.top_movies
         ):
             from ui.show_finder_window import launch_show_finder
 
-            launch_show_finder(config=config, logger=logger)
+            launch_show_finder(
+                config=config,
+                logger=logger,
+                search_service=_create_media_service(config, logger),
+            )
             return 0
 
         return _run_cli(arguments, config, logger)
@@ -85,39 +115,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
 
+def _create_media_service(
+    config: ApplicationConfig, logger: logging.Logger
+) -> MediaDiscoveryService:
+    """Compose the source-independent media discovery service."""
+    tvmaze = TVMazeService(config=config, logger=logger)
+    providers = {
+        "TVMaze": TVMazeMediaProvider(tvmaze),
+        "TMDB": TmdbProvider(config, logger),
+        "Trakt": TraktProvider(config, logger),
+        "Simkl": SimklProvider(config, logger),
+        "IMDb": ImdbDatasetProvider(config, logger, config.imdb_minimum_votes),
+    }
+    return MediaDiscoveryService(providers, config)
+
+
 def _run_cli(
     arguments: argparse.Namespace,
     config: ApplicationConfig,
     logger: logging.Logger,
 ) -> int:
-    """Run one validated search in the command-line interface."""
+    """Run one validated catalog search or top-movies request in the CLI."""
     try:
-        search_term = arguments.search_term
-        if search_term is None:
-            search_term = input("Enter a show name to search: ")
-        search_term = validate_search_term(
-            search_term, minimum_length=config.minimum_search_length
-        )
-
-        minimum_rating = None
-        if arguments.min_rating is not None:
-            minimum_rating = validate_rating_threshold(
+        search_service = _create_media_service(config, logger)
+        if arguments.top_movies:
+            items = search_service.top_movies(arguments.source)
+        else:
+            search_term = arguments.search_term
+            if search_term is None:
+                search_term = input("Enter a title or search phrase: ")
+            criteria = search_service.create_criteria(
+                arguments.source,
+                arguments.media_type,
+                search_term,
                 arguments.min_rating,
-                minimum=config.rating_minimum,
-                maximum=config.rating_maximum,
             )
-
-        logger.info("User search", extra={"search_term": search_term})
-        shows = TVMazeService(config=config, logger=logger).search_shows(search_term)
-        if minimum_rating is not None:
-            shows = ShowFilterService().filter_by_minimum_rating(
-                shows, minimum_rating
+            logger.info(
+                "User search",
+                extra={
+                    "search_term": criteria.term,
+                    "source": criteria.source,
+                    "media_type": criteria.media_type,
+                },
             )
+            items = search_service.search_criteria(criteria)
 
-        if not shows:
-            print("No shows matched your search and rating criteria.")
+        if not items:
+            print("No media items matched your search and rating criteria.")
             return 0
-        print(explain_shows(shows))
+        print(explain_media_items(items))
         return 0
     except ApplicationError as error:
         logger.exception("Application error")

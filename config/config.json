@@ -1,6 +1,18 @@
 {
   "api_base_url": "https://api.tvmaze.com/",
   "search_path": "search/shows",
+  "provider_base_urls": {
+    "tmdb": "https://api.themoviedb.org/3/",
+    "trakt": "https://api.trakt.tv/",
+    "simkl": "https://api.simkl.com/"
+  },
+  "website_base_urls": {
+    "tmdb": "https://www.themoviedb.org/",
+    "trakt": "https://trakt.tv/",
+    "simkl": "https://simkl.com/",
+    "imdb": "https://www.imdb.com/"
+  },
+  "imdb_minimum_votes": 25000,
   "timeout_seconds": 10,
   "minimum_search_length": 2,
   "rating_minimum": 0,

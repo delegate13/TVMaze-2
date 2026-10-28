@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
+from utils.configuration_validators import validate_configuration
 from utils.exceptions import ConfigurationError
-from utils.validators import validate_configuration
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,9 @@ class ApplicationConfig:
     rating_minimum: float
     rating_maximum: float
     log_level: str
+    provider_base_urls: Mapping[str, str] = field(default_factory=dict)
+    imdb_minimum_votes: int = 25_000
+    website_base_urls: Mapping[str, str] = field(default_factory=dict)
 
 
 class ConfigurationService:
@@ -51,13 +54,6 @@ class ConfigurationService:
             ) from error
 
         validate_configuration(data)
-        parsed_url = urlparse(data["api_base_url"])
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise ConfigurationError(
-                "api_base_url must be an absolute HTTP or HTTPS URL."
-            )
-        if not data["search_path"].strip():
-            raise ConfigurationError("search_path cannot be blank.")
 
         return ApplicationConfig(
             api_base_url=data["api_base_url"].rstrip("/") + "/",
@@ -67,4 +63,7 @@ class ConfigurationService:
             rating_minimum=float(data["rating_minimum"]),
             rating_maximum=float(data["rating_maximum"]),
             log_level=data["log_level"].upper(),
+            provider_base_urls=data.get("provider_base_urls", {}),
+            imdb_minimum_votes=data.get("imdb_minimum_votes", 25_000),
+            website_base_urls=data.get("website_base_urls", {}),
         )

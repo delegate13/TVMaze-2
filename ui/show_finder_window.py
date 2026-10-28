@@ -1,4 +1,4 @@
-"""Friendly desktop interface for searching TVMaze."""
+"""Friendly desktop interface for multi-source media discovery."""
 
 from __future__ import annotations
 
@@ -8,18 +8,18 @@ import queue
 import sys
 import threading
 import tkinter as tk
-import webbrowser
-from collections.abc import Callable
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, ttk
 
-from models.show import Show
+from models.media_item import MediaItem, MediaType
 from services.configuration_service import ApplicationConfig
-from services.show_filter_service import ShowFilterService
-from services.tvmaze_service import TVMazeService
+from services.media_discovery_service import (
+    MediaDiscoveryService,
+    MediaSearchCriteria,
+)
+from ui.menu_bar import MenuActions, ShowFinderMenu
+from ui.results_view import ShowResultsView
 from utils.exceptions import ApplicationError, ValidationError
-from utils.json_explainer import clean_summary
-from utils.validators import validate_rating_threshold, validate_search_term
 
 BACKGROUND = "#F3F5F9"
 SURFACE = "#FFFFFF"
@@ -31,154 +31,60 @@ SUCCESS = "#16866A"
 ERROR = "#B84045"
 CARD_BORDER = "#E6EAF1"
 
-SearchResult = tuple[list[Show] | None, str | None]
+SearchResult = tuple[list[MediaItem] | None, str | None]
 
 
 class ShowFinderWindow:
-    """Build and manage the Tkinter show search experience."""
+    """Build and manage the Tkinter media discovery experience."""
 
     def __init__(
         self,
         root: tk.Tk,
         config: ApplicationConfig,
         logger: logging.Logger,
-        service_factory: Callable[
-            [ApplicationConfig, logging.Logger], TVMazeService
-        ] = TVMazeService,
+        search_service: MediaDiscoveryService,
     ) -> None:
         """Create the interface and inject its service dependencies."""
         self._root = root
         self._config = config
         self._logger = logger
-        self._service = service_factory(config, logger)
-        self._filter_service = ShowFilterService()
-        self._results: queue.Queue[SearchResult] = queue.Queue()
+        self._search_service = search_service
+        self._search_results: queue.Queue[SearchResult] = queue.Queue()
         self._search_in_progress = False
-        self._summary_labels: list[ttk.Label] = []
 
-        self._root.title("TVMaze | Show Finder")
+        self._root.title("Media Finder | Movies, Shows & Episodes")
         self._root.geometry("980x760")
         self._root.minsize(680, 580)
         self._root.resizable(True, True)
         self._root.configure(background=BACKGROUND)
         self._configure_styles()
-        self._build_menu_bar()
         self._build_layout()
+        self._menu = ShowFinderMenu(
+            root=self._root,
+            search_entry=self._search_entry,
+            actions=MenuActions(
+                new_search=self._new_search,
+                clear_results=self._clear_results_view,
+                focus_search=self._focus_search,
+                search=self._start_search,
+                scroll_top=self._results_view.scroll_top,
+                scroll_bottom=self._results_view.scroll_bottom,
+                previous_page=self._results_view.previous_page,
+                next_page=self._results_view.next_page,
+            ),
+        )
         self._root.bind("<Return>", self._on_enter_pressed)
-        self._root.bind_all("<Control-n>", self._on_new_search_shortcut)
-        self._root.bind_all("<Control-f>", self._on_focus_search_shortcut)
-        self._root.bind_all("<Control-l>", self._on_clear_results_shortcut)
-        self._root.bind_all("<Control-a>", self._on_select_all_shortcut)
 
     def run(self) -> None:
         """Start the desktop application's event loop."""
         self._root.mainloop()
 
-    def _build_menu_bar(self) -> None:
-        """Create standard application menus and their keyboard accelerators."""
-        self._menu_bar = tk.Menu(self._root, tearoff=False)
-        self._root.configure(menu=self._menu_bar)
-
-        file_menu = tk.Menu(self._menu_bar, tearoff=False)
-        file_menu.add_command(
-            label="New Search",
-            accelerator="Ctrl+N",
-            command=self._new_search,
-        )
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", accelerator="Alt+F4", command=self._root.destroy)
-        self._menu_bar.add_cascade(label="File", menu=file_menu)
-
-        edit_menu = tk.Menu(self._menu_bar, tearoff=False)
-        edit_menu.add_command(
-            label="Cut",
-            accelerator="Ctrl+X",
-            command=lambda: self._edit_search_entry("<<Cut>>"),
-        )
-        edit_menu.add_command(
-            label="Copy",
-            accelerator="Ctrl+C",
-            command=lambda: self._edit_search_entry("<<Copy>>"),
-        )
-        edit_menu.add_command(
-            label="Paste",
-            accelerator="Ctrl+V",
-            command=lambda: self._edit_search_entry("<<Paste>>"),
-        )
-        edit_menu.add_separator()
-        edit_menu.add_command(
-            label="Select All",
-            accelerator="Ctrl+A",
-            command=self._select_all_search_text,
-        )
-        self._menu_bar.add_cascade(label="Edit", menu=edit_menu)
-
-        view_menu = tk.Menu(self._menu_bar, tearoff=False)
-        view_menu.add_command(
-            label="Clear Results",
-            accelerator="Ctrl+L",
-            command=self._clear_results_view,
-        )
-        view_menu.add_command(
-            label="Scroll to Top",
-            accelerator="Home",
-            command=lambda: self._canvas.yview_moveto(0),
-        )
-        view_menu.add_command(
-            label="Scroll to Bottom",
-            accelerator="End",
-            command=lambda: self._canvas.yview_moveto(1),
-        )
-        self._menu_bar.add_cascade(label="View", menu=view_menu)
-
-        navigate_menu = tk.Menu(self._menu_bar, tearoff=False)
-        navigate_menu.add_command(
-            label="Focus Search",
-            accelerator="Ctrl+F",
-            command=self._focus_search,
-        )
-        navigate_menu.add_command(
-            label="Search Shows",
-            accelerator="Enter",
-            command=self._start_search,
-        )
-        navigate_menu.add_command(
-            label="Previous Page",
-            accelerator="Page Up",
-            command=lambda: self._canvas.yview_scroll(-1, "pages"),
-        )
-        navigate_menu.add_command(
-            label="Next Page",
-            accelerator="Page Down",
-            command=lambda: self._canvas.yview_scroll(1, "pages"),
-        )
-        self._menu_bar.add_cascade(label="Navigate", menu=navigate_menu)
-
-        help_menu = tk.Menu(self._menu_bar, tearoff=False)
-        help_menu.add_command(
-            label="TVMaze Website",
-            command=lambda: webbrowser.open(self._config.api_base_url),
-        )
-        help_menu.add_command(label="About TVMaze Show Finder", command=self._show_about)
-        self._menu_bar.add_cascade(label="Help", menu=help_menu)
-
-    def _edit_search_entry(self, virtual_event: str) -> None:
-        """Apply a standard clipboard operation to the search field."""
-        self._search_entry.focus_set()
-        self._search_entry.event_generate(virtual_event)
-
-    def _select_all_search_text(self) -> None:
-        """Select all text in the search field and focus it."""
-        self._search_entry.focus_set()
-        self._search_entry.selection_range(0, tk.END)
-        self._search_entry.icursor(tk.END)
-
     def _focus_search(self) -> None:
-        """Move keyboard focus to the show search field."""
+        """Move keyboard focus to the media search field."""
         self._search_entry.focus_set()
 
     def _new_search(self) -> None:
-        """Reset the search controls and clear previously displayed shows."""
+        """Reset the search controls and clear previously displayed items."""
         self._search_var.set("")
         self._rating_var.set("Any rating")
         self._clear_results_view()
@@ -187,42 +93,11 @@ class ShowFinderWindow:
 
     def _clear_results_view(self) -> None:
         """Clear displayed results without changing the current search text."""
-        self._clear_results()
         self._count_var.set("")
-        self._show_empty_state(
+        self._results_view.show_empty_state(
             "Start with a search",
-            "Type a show title or a couple of keywords above to get started.",
+            "Choose a source and media type, then search a title or keyword.",
         )
-
-    def _show_about(self) -> None:
-        """Display application information in a native dialog."""
-        messagebox.showinfo(
-            "About TVMaze Show Finder",
-            "TVMaze Show Finder\n"
-            "Discover television shows with ratings, genres, and summaries.\n\n"
-            "Show information is provided by TVMaze.",
-            parent=self._root,
-        )
-
-    def _on_new_search_shortcut(self, _event: tk.Event) -> str:
-        """Handle Ctrl+N to reset the search form."""
-        self._new_search()
-        return "break"
-
-    def _on_focus_search_shortcut(self, _event: tk.Event) -> str:
-        """Handle Ctrl+F to focus the search field."""
-        self._focus_search()
-        return "break"
-
-    def _on_clear_results_shortcut(self, _event: tk.Event) -> str:
-        """Handle Ctrl+L to clear displayed results."""
-        self._clear_results_view()
-        return "break"
-
-    def _on_select_all_shortcut(self, _event: tk.Event) -> str:
-        """Handle Ctrl+A by selecting the search text."""
-        self._select_all_search_text()
-        return "break"
 
     def _configure_styles(self) -> None:
         """Set a consistent, calm visual style for themed widgets."""
@@ -322,25 +197,31 @@ class ShowFinderWindow:
         outer = ttk.Frame(self._root, padding=(42, 34, 42, 26))
         outer.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(outer, text="TVMAZE  /  DISCOVER", foreground=ACCENT).pack(
+        ttk.Label(outer, text="MEDIA FINDER  /  DISCOVER", foreground=ACCENT).pack(
             anchor=tk.W, pady=(0, 12)
         )
-        ttk.Label(outer, text="Find your next favorite show", style="Title.TLabel").pack(
+        ttk.Label(outer, text="Find your next favorite", style="Title.TLabel").pack(
             anchor=tk.W
         )
         ttk.Label(
             outer,
-            text="Search thousands of shows, then narrow the list by rating.",
+            text="Search movies, shows, and episodes across independent catalogs.",
             style="Subtitle.TLabel",
         ).pack(anchor=tk.W, pady=(5, 23))
 
         search_panel = ttk.Frame(outer, style="Card.TFrame", padding=(18, 17))
         search_panel.pack(fill=tk.X)
-        ttk.Label(search_panel, text="SHOW OR KEYWORD", style="CardMeta.TLabel").grid(
+        ttk.Label(search_panel, text="TITLE OR KEYWORD", style="CardMeta.TLabel").grid(
             row=0, column=0, sticky=tk.W, pady=(0, 7)
         )
-        ttk.Label(search_panel, text="MINIMUM RATING", style="CardMeta.TLabel").grid(
+        ttk.Label(search_panel, text="MEDIA TYPE", style="CardMeta.TLabel").grid(
             row=0, column=1, sticky=tk.W, padx=(12, 0), pady=(0, 7)
+        )
+        ttk.Label(search_panel, text="SOURCE", style="CardMeta.TLabel").grid(
+            row=0, column=2, sticky=tk.W, padx=(12, 0), pady=(0, 7)
+        )
+        ttk.Label(search_panel, text="MINIMUM RATING", style="CardMeta.TLabel").grid(
+            row=0, column=3, sticky=tk.W, padx=(12, 0), pady=(0, 7)
         )
 
         self._search_var = tk.StringVar()
@@ -350,6 +231,26 @@ class ShowFinderWindow:
             font=("Segoe UI", 11),
         )
         self._search_entry.insert(0, "")
+
+        self._media_type_var = tk.StringVar(value="TV Shows")
+        media_type_picker = ttk.Combobox(
+            search_panel,
+            textvariable=self._media_type_var,
+            values=("Movies", "TV Shows", "Episodes"),
+            state="readonly",
+            width=12,
+        )
+        media_type_picker.grid(row=1, column=1, sticky=tk.EW, padx=(12, 0))
+
+        self._source_var = tk.StringVar(value="TVMaze")
+        source_picker = ttk.Combobox(
+            search_panel,
+            textvariable=self._source_var,
+            values=self._search_service.provider_names,
+            state="readonly",
+            width=12,
+        )
+        source_picker.grid(row=1, column=2, sticky=tk.EW, padx=(12, 0))
 
         self._rating_var = tk.StringVar(value="Any rating")
         rating_options = {
@@ -375,17 +276,26 @@ class ShowFinderWindow:
             state="readonly",
             width=14,
         )
-        rating_picker.grid(row=1, column=1, sticky=tk.EW, padx=(12, 0))
+        rating_picker.grid(row=1, column=3, sticky=tk.EW, padx=(12, 0))
 
         self._search_button = ttk.Button(
             search_panel,
-            text="Search shows",
+            text="Search",
             style="Accent.TButton",
             command=self._start_search,
         )
-        self._search_button.grid(row=1, column=2, sticky=tk.EW, padx=(12, 0))
+        self._search_button.grid(row=1, column=4, sticky=tk.EW, padx=(12, 0))
+        self._top_movies_button = ttk.Button(
+            search_panel,
+            text="Top 100 Movies",
+            command=self._start_top_movies,
+        )
+        self._top_movies_button.grid(
+            row=2, column=4, sticky=tk.EW, padx=(12, 8), pady=(9, 0)
+        )
         search_panel.columnconfigure(0, weight=1)
-        search_panel.columnconfigure(1, weight=0)
+        for column in range(1, 5):
+            search_panel.columnconfigure(column, weight=0)
 
         status_row = ttk.Frame(outer)
         status_row.pack(fill=tk.X, pady=(17, 12))
@@ -399,30 +309,8 @@ class ShowFinderWindow:
             status_row, textvariable=self._count_var, style="Status.TLabel"
         ).pack(side=tk.RIGHT)
 
-        results_shell = ttk.Frame(outer)
-        results_shell.pack(fill=tk.BOTH, expand=True)
-        self._canvas = tk.Canvas(
-            results_shell,
-            background=BACKGROUND,
-            highlightthickness=0,
-            borderwidth=0,
-        )
-        scrollbar = ttk.Scrollbar(
-            results_shell, orient=tk.VERTICAL, command=self._canvas.yview
-        )
-        self._results_frame = ttk.Frame(self._canvas)
-        self._results_window = self._canvas.create_window(
-            (0, 0), window=self._results_frame, anchor=tk.NW
-        )
-        self._canvas.configure(yscrollcommand=scrollbar.set)
-        self._results_frame.bind("<Configure>", self._on_results_resized)
-        self._canvas.bind("<Configure>", self._on_canvas_resized)
-        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._show_empty_state(
-            "Start with a search",
-            "Type a show title or a couple of keywords above to get started.",
-        )
+        self._results_view = ShowResultsView(outer)
+        self._results_view.pack(fill=tk.BOTH, expand=True)
 
     def _on_enter_pressed(self, _event: tk.Event) -> str:
         """Start a search when Enter is pressed from any search control."""
@@ -434,201 +322,175 @@ class ShowFinderWindow:
         if self._search_in_progress:
             return
         try:
-            search_term = validate_search_term(
-                self._search_var.get(),
-                minimum_length=self._config.minimum_search_length,
-            )
             rating_text = self._rating_var.get()
-            minimum_rating = (
-                None
-                if rating_text == "Any rating"
-                else validate_rating_threshold(
-                    rating_text.removesuffix("+"),
-                    minimum=self._config.rating_minimum,
-                    maximum=self._config.rating_maximum,
-                )
+            criteria = self._search_service.create_criteria(
+                self._source_var.get(),
+                self._selected_media_type(),
+                self._search_var.get(),
+                None if rating_text == "Any rating" else rating_text.removesuffix("+"),
             )
+            self._prepare_imdb_source()
         except ValidationError as error:
             self._set_status(str(error), ERROR)
             self._search_entry.focus_set()
             return
 
-        self._logger.info("User search", extra={"search_term": search_term})
+        self._logger.info(
+            "User search",
+            extra={"search_term": criteria.term, "source": criteria.source},
+        )
         self._search_in_progress = True
         self._search_button.configure(state=tk.DISABLED, text="Searching...")
-        self._set_status("Searching TVMaze... This usually takes just a moment.")
+        self._set_status(
+            f"Searching {criteria.source}... This usually takes just a moment."
+        )
         self._count_var.set("")
         self._show_loading_state()
         self._worker_thread = threading.Thread(
             target=self._search_worker,
-            args=(search_term, minimum_rating),
-            name="tvmaze-search",
+            args=(criteria, None),
+            name="media-search",
             daemon=True,
         )
         self._worker_thread.start()
         self._root.after(100, self._poll_search_result)
 
-    def _search_worker(self, search_term: str, minimum_rating: float | None) -> None:
+    def _start_top_movies(self) -> None:
+        """Load a provider's top-rated movie list without blocking the GUI."""
+        if self._search_in_progress:
+            return
+        source = self._source_var.get()
+        if source not in {"TMDB", "IMDb"}:
+            self._set_status(
+                "Top 100 lists are available from TMDB and IMDb.", ERROR
+            )
+            return
+        try:
+            self._prepare_imdb_source()
+        except ValidationError as error:
+            self._set_status(str(error), ERROR)
+            return
+        self._search_in_progress = True
+        self._search_button.configure(state=tk.DISABLED)
+        self._top_movies_button.configure(state=tk.DISABLED)
+        self._set_status(f"Loading {source}'s top movies...")
+        self._count_var.set("")
+        self._results_view.show_empty_state(
+            "Loading top movies...",
+            "Getting the latest rankings from the selected source.",
+        )
+        self._worker_thread = threading.Thread(
+            target=self._search_worker,
+            args=(None, source),
+            name="top-movies-search",
+            daemon=True,
+        )
+        self._worker_thread.start()
+        self._root.after(100, self._poll_search_result)
+
+    def _search_worker(
+        self, criteria: MediaSearchCriteria | None, source: str | None
+    ) -> None:
         """Perform network I/O off the UI thread and enqueue its result."""
         try:
-            shows = self._service.search_shows(search_term)
-            if minimum_rating is not None:
-                shows = self._filter_service.filter_by_minimum_rating(
-                    shows, minimum_rating
-                )
-            self._results.put((shows, None))
+            if criteria is None and source is not None:
+                items = self._search_service.top_movies(source)
+            elif criteria is not None:
+                items = self._search_service.search_criteria(criteria)
+            else:
+                raise RuntimeError("Search worker received no operation.")
+            self._search_results.put((items, None))
         except ApplicationError as error:
             self._logger.exception("Search failed")
-            self._results.put((None, str(error)))
+            self._search_results.put((None, str(error)))
         except Exception:
             self._logger.exception("Unexpected error during GUI search")
-            self._results.put(
+            self._search_results.put(
                 (None, "Something went wrong while searching. Please try again.")
             )
 
     def _poll_search_result(self) -> None:
         """Update widgets on the UI thread after the worker finishes."""
         try:
-            shows, error_message = self._results.get_nowait()
+            items, error_message = self._search_results.get_nowait()
         except queue.Empty:
             self._root.after(100, self._poll_search_result)
             return
 
         self._search_in_progress = False
-        self._search_button.configure(state=tk.NORMAL, text="Search shows")
+        self._search_button.configure(state=tk.NORMAL, text="Search")
+        self._top_movies_button.configure(state=tk.NORMAL)
         if error_message:
             self._set_status(error_message, ERROR)
             self._count_var.set("")
-            self._show_empty_state(
+            self._results_view.show_empty_state(
                 "We couldn't complete that search",
                 "Check your connection and try again in a moment.",
             )
             return
 
-        assert shows is not None
-        count = len(shows)
-        self._count_var.set(f"{count} " + ("show" if count == 1 else "shows"))
-        if not shows:
+        assert items is not None
+        count = len(items)
+        self._count_var.set(f"{count} " + ("result" if count == 1 else "results"))
+        if not items:
             self._set_status("Search complete", MUTED)
-            self._show_empty_state(
-                "No shows found",
-                "Try a different title or choose a lower minimum rating.",
+            self._results_view.show_empty_state(
+                "No matching titles found",
+                "Try another search, source, or minimum rating.",
             )
             return
 
         self._set_status("Search complete", SUCCESS)
-        self._render_results(shows)
-
-    def _render_results(self, shows: list[Show]) -> None:
-        """Render show cards into the scrollable results area."""
-        self._clear_results()
-        for show in shows:
-            card = ttk.Frame(
-                self._results_frame,
-                style="Card.TFrame",
-                padding=(18, 15),
-            )
-            card.pack(fill=tk.X, pady=(0, 10))
-            top_row = ttk.Frame(card, style="Card.TFrame")
-            top_row.pack(fill=tk.X)
-            ttk.Label(top_row, text=show.name, style="CardTitle.TLabel").pack(
-                side=tk.LEFT, anchor=tk.W
-            )
-            rating_text = (
-                f"★  {show.rating:g} / 10"
-                if show.rating is not None
-                else "Not rated"
-            )
-            rating_color = SUCCESS if show.rating is not None else MUTED
-            rating_label = ttk.Label(
-                top_row,
-                text=rating_text,
-                style="CardMeta.TLabel",
-                foreground=rating_color,
-            )
-            rating_label.pack(side=tk.RIGHT, anchor=tk.E)
-
-            genre_text = "  ·  ".join(show.genres) if show.genres else "No genres listed"
-            ttk.Label(
-                card,
-                text=genre_text,
-                style="CardMeta.TLabel",
-            ).pack(anchor=tk.W, pady=(5, 0))
-            summary = clean_summary(show.summary) if show.summary else ""
-            if summary:
-                summary_text = summary if len(summary) <= 400 else summary[:397] + "..."
-                summary_label = ttk.Label(
-                    card,
-                    text=summary_text,
-                    style="CardMeta.TLabel",
-                    wraplength=max(300, self._canvas.winfo_width() - 70),
-                    justify=tk.LEFT,
-                )
-                summary_label.pack(anchor=tk.W, fill=tk.X, pady=(10, 0))
-                self._summary_labels.append(summary_label)
-            if show.url and show.url.startswith(("https://", "http://")):
-                ttk.Button(
-                    card,
-                    text="View on TVMaze  ↗",
-                    style="Link.TButton",
-                    command=lambda url=show.url: webbrowser.open(url),
-                ).pack(anchor=tk.W, pady=(7, 0))
+        self._results_view.render(items)
 
     def _show_loading_state(self) -> None:
         """Replace old results with a friendly loading hint."""
-        self._show_empty_state(
-            "Finding your shows...",
-            "We’re checking TVMaze for matching titles.",
+        self._results_view.show_empty_state(
+            "Finding matching titles...",
+            "We’re searching the selected catalog.",
         )
 
-    def _show_empty_state(self, title: str, message: str) -> None:
-        """Display an informative placeholder in the results pane."""
-        self._clear_results()
-        empty_panel = ttk.Frame(
-            self._results_frame,
-            style="Card.TFrame",
-            padding=(24, 28),
-        )
-        empty_panel.pack(fill=tk.X)
-        ttk.Label(
-            empty_panel,
-            text=title,
-            style="CardTitle.TLabel",
-        ).pack(anchor=tk.W)
-        ttk.Label(
-            empty_panel,
-            text=message,
-            style="CardMeta.TLabel",
-        ).pack(anchor=tk.W, pady=(7, 0))
+    def _selected_media_type(self) -> MediaType:
+        """Translate the user-facing media label to its provider value."""
+        return {
+            "Movies": "movie",
+            "Episodes": "episode",
+            "TV Shows": "show",
+        }[self._media_type_var.get()]
 
-    def _clear_results(self) -> None:
-        """Remove previous cards and placeholders."""
-        for child in self._results_frame.winfo_children():
-            child.destroy()
-        self._summary_labels.clear()
+    def _prepare_imdb_source(self) -> None:
+        """Request the local folder containing IMDb's official dataset files."""
+        if self._source_var.get() != "IMDb" or os.environ.get(
+            "IMDB_DATASET_DIRECTORY"
+        ):
+            return
+        directory = filedialog.askdirectory(
+            parent=self._root,
+            title="Select the folder containing IMDb dataset files",
+        )
+        if not directory:
+            raise ValidationError("Select the folder containing the IMDb datasets.")
+        os.environ["IMDB_DATASET_DIRECTORY"] = directory
 
     def _set_status(self, message: str, color: str = MUTED) -> None:
         """Update the concise feedback line above the results."""
         self._status_var.set(message)
         self._status_label.configure(foreground=color)
 
-    def _on_results_resized(self, _event: tk.Event) -> None:
-        """Keep the scrollable content region sized to its children."""
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-
-    def _on_canvas_resized(self, event: tk.Event) -> None:
-        """Keep result cards aligned to the available window width."""
-        self._canvas.itemconfigure(self._results_window, width=event.width)
-        wraplength = max(300, event.width - 70)
-        for label in self._summary_labels:
-            label.configure(wraplength=wraplength)
-
-
-def launch_show_finder(config: ApplicationConfig, logger: logging.Logger) -> None:
-    """Create and display the desktop application window."""
+def launch_show_finder(
+    config: ApplicationConfig,
+    logger: logging.Logger,
+    search_service: MediaDiscoveryService,
+) -> None:
+    """Create and display the multi-source desktop application window."""
     _configure_tk_runtime()
     root = tk.Tk()
-    ShowFinderWindow(root=root, config=config, logger=logger).run()
+    ShowFinderWindow(
+        root=root,
+        config=config,
+        logger=logger,
+        search_service=search_service,
+    ).run()
 
 
 def _configure_tk_runtime() -> None:

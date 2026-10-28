@@ -10,8 +10,8 @@ import requests
 
 from models.show import Show
 from services.configuration_service import ApplicationConfig
+from utils.api_validators import validate_api_response
 from utils.exceptions import ApiError, ValidationError
-from utils.validators import validate_api_response
 
 
 class TVMazeService:

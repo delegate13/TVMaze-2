@@ -31,3 +31,26 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Create build environment
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+      - name: Build Windows installer
+        run: .\build_windows.ps1 -SkipDependencyInstall
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: TVMazeShowFinder-Windows-Installer
+          path: dist-installer/TVMazeShowFinder-Setup.exe
+          if-no-files-found: error

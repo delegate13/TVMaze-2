@@ -65,6 +65,24 @@ def test_invalid_configuration_values_raise_error(tmp_path, logger):
         ConfigurationService(logger).load(path)
 
 
+def test_invalid_api_url_raises_configuration_error(tmp_path, logger):
+    """Reject non-HTTP API base URLs in configuration validation."""
+    config_data = {
+        "api_base_url": "file:///local/data",
+        "search_path": "shows",
+        "timeout_seconds": 3,
+        "minimum_search_length": 2,
+        "rating_minimum": 0,
+        "rating_maximum": 10,
+        "log_level": "INFO",
+    }
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config_data), encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="absolute HTTP"):
+        ConfigurationService(logger).load(path)
+
+
 def test_invalid_json_raises_configuration_error(tmp_path, logger):
     """Convert malformed JSON into a configuration error."""
     path = tmp_path / "config.json"

@@ -48,7 +48,20 @@ def test_direct_model_creation_rejects_invalid_rating():
         Show(1, "Invalid", 11, (), None, None)
 
 
+def test_direct_model_creation_rejects_non_finite_rating():
+    """Keep non-finite numeric values out of the normalized show model."""
+    with pytest.raises(ValidationError, match="between 0 and 10"):
+        Show(1, "Invalid", float("nan"), (), None, None)
+
+
 def test_factory_rejects_malformed_payload():
     """Raise a domain validation error for malformed show data."""
     with pytest.raises(ValidationError, match="id"):
-        Show.from_api_payload({"id": "not-an-id"})
+        Show.from_api_payload(
+            {
+                "id": "not-an-id",
+                "name": "Malformed",
+                "rating": {"average": None},
+                "genres": [],
+            }
+        )

@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from models.show import Show
+from models.media_item import MediaItem
 from services.configuration_service import ApplicationConfig
+from services.media_discovery_service import (
+    MediaDiscoveryService,
+    MediaSearchCriteria,
+)
 from ui.show_finder_window import (
     ShowFinderWindow,
     _configure_tk_runtime,
@@ -28,6 +32,13 @@ def _widget_text(widget):
         for child in widget.winfo_children()
         for child_text in _widget_text(child)
     ]
+
+
+def _finish_background_task(window):
+    """Wait for a search worker and apply its queued result deterministically."""
+    window._worker_thread.join(timeout=5)
+    assert not window._worker_thread.is_alive()
+    window._poll_search_result()
 
 
 @pytest.fixture
@@ -53,11 +64,27 @@ def window(config):
     except tk.TclError as error:
         pytest.skip(f"Tk runtime is unavailable: {error}")
     root.withdraw()
+    logger = logging.getLogger("test.gui")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
     finder = ShowFinderWindow(
         root=root,
         config=config,
-        logger=logging.getLogger("test.gui"),
-        service_factory=lambda config, logger: None,
+        logger=logger,
+        search_service=MediaDiscoveryService(
+            providers={
+                "TVMaze": type(
+                    "EmptyProvider",
+                    (),
+                    {
+                        "search": lambda self, term, media_type: [],
+                        "top_movies": lambda self, limit: [],
+                    },
+                )()
+            },
+            config=config,
+        ),
     )
     yield finder
     root.destroy()
@@ -65,15 +92,15 @@ def window(config):
 
 def test_window_has_friendly_initial_state(window):
     """Build the desktop window with a useful initial search prompt."""
-    assert window._root.title() == "TVMaze | Show Finder"
+    assert window._root.title() == "Media Finder | Movies, Shows & Episodes"
     assert window._status_var.get() == "Ready when you are."
-    assert window._results_frame.winfo_children()
+    assert window._results_view._content.winfo_children()
     assert tuple(window._root.resizable()) == (1, 1)
 
 
 def test_window_has_standard_menus(window):
     """Provide familiar desktop menus and common actions."""
-    menu_bar = window._menu_bar
+    menu_bar = window._menu.menu_bar
 
     assert [
         menu_bar.entrycget(index, "label")
@@ -86,7 +113,9 @@ def test_new_search_resets_controls_results_and_status(window):
     window._search_var.set("Example")
     window._rating_var.set("8+")
     window._count_var.set("3 shows")
-    window._render_results([Show(1, "Example", 8.0, (), None, None)])
+    window._results_view.render(
+        [MediaItem("1", "Example", "show", "TVMaze", 8.0)]
+    )
 
     window._new_search()
 
@@ -94,20 +123,22 @@ def test_new_search_resets_controls_results_and_status(window):
     assert window._rating_var.get() == "Any rating"
     assert window._count_var.get() == ""
     assert window._status_var.get() == "Ready when you are."
-    assert "Start with a search" in _widget_text(window._results_frame)
+    assert "Start with a search" in _widget_text(window._results_view)
 
 
 def test_clear_results_preserves_current_search(window):
     """Clear the visible results while preserving the active search phrase."""
     window._search_var.set("Example")
     window._count_var.set("1 show")
-    window._render_results([Show(1, "Example", 8.0, (), None, None)])
+    window._results_view.render(
+        [MediaItem("1", "Example", "show", "TVMaze", 8.0)]
+    )
 
     window._clear_results_view()
 
     assert window._search_var.get() == "Example"
     assert window._count_var.get() == ""
-    assert "Start with a search" in _widget_text(window._results_frame)
+    assert "Start with a search" in _widget_text(window._results_view)
 
 
 def test_enter_key_reports_short_search_term(window):
@@ -121,109 +152,134 @@ def test_enter_key_reports_short_search_term(window):
 
 def test_search_runs_in_background_and_renders_show_cards(window):
     """Search asynchronously and display rating, genres, summary, and link."""
-    expected_show = Show(
-        1,
+    expected_item = MediaItem(
+        "1",
         "Example",
+        "show",
+        "TVMaze",
         8.5,
-        ("Drama", "Mystery"),
-        "<p>A good <b>story</b>.</p>",
-        "https://example.test/show",
+        overview="<p>A good <b>story</b>.</p>",
+        url="https://example.test/show",
     )
 
     class Service:
-        def search_shows(self, search_term):
-            assert search_term == "Example"
-            return [expected_show]
+        provider_names = ("TVMaze",)
 
-    window._service = Service()
+        def create_criteria(self, source, media_type, term, minimum_rating):
+            assert term == "Example"
+            return MediaSearchCriteria(source, media_type, term, minimum_rating)
+
+        def search_criteria(self, criteria):
+            return [expected_item]
+
+        def top_movies(self, source):
+            return []
+
+    window._search_service = Service()
     window._search_var.set("Example")
     window._start_search()
-    window._worker_thread.join(timeout=2)
-    window._poll_search_result()
+    _finish_background_task(window)
 
     assert not window._search_in_progress
-    assert window._count_var.get() == "1 show"
+    assert window._count_var.get() == "1 result"
     assert window._status_var.get() == "Search complete"
-    assert "Example" in _widget_text(window._results_frame)
-    assert "A good story." in _widget_text(window._results_frame)
-    assert "View on TVMaze  ↗" in _widget_text(window._results_frame)
-    assert len(window._summary_labels) == 1
+    assert "Example" in _widget_text(window._results_view)
+    assert "A good story." in _widget_text(window._results_view)
+    assert "View on TVMaze  ↗" in _widget_text(window._results_view)
+    assert len(window._results_view._summary_labels) == 1
 
 
 def test_rating_filter_is_applied_before_display(window):
     """Respect the selected minimum rating in the UI search flow."""
     class Service:
-        def search_shows(self, _search_term):
+        def search(self, search_term, media_type):
             return [
-                Show(1, "Low", 5.0, (), None, None),
-                Show(2, "High", 9.0, (), None, None),
+                MediaItem("1", "Low", "show", "TVMaze", 5.0),
+                MediaItem("2", "High", "show", "TVMaze", 9.0),
             ]
 
-    window._service = Service()
+    window._search_service = MediaDiscoveryService(
+        {"TVMaze": Service()}, window._config
+    )
     window._search_var.set("Example")
     window._rating_var.set("8+")
     window._start_search()
-    window._worker_thread.join(timeout=2)
-    window._poll_search_result()
+    _finish_background_task(window)
 
-    assert window._count_var.get() == "1 show"
-    assert "High" in _widget_text(window._results_frame)
+    assert window._count_var.get() == "1 result"
+    assert "High" in _widget_text(window._results_view)
 
 
 def test_empty_search_results_show_helpful_message(window):
     """Explain what to do when the API returns no matching shows."""
     class Service:
-        def search_shows(self, _search_term):
+        provider_names = ("TVMaze",)
+
+        def create_criteria(self, source, media_type, search_term, minimum_rating):
+            return MediaSearchCriteria(source, media_type, search_term, minimum_rating)
+
+        def search_criteria(self, criteria):
             return []
 
-    window._service = Service()
+        def top_movies(self, source):
+            return []
+
+    window._search_service = Service()
     window._search_var.set("Missing")
     window._start_search()
-    window._worker_thread.join(timeout=2)
-    window._poll_search_result()
+    _finish_background_task(window)
 
-    assert window._count_var.get() == "0 shows"
+    assert window._count_var.get() == "0 results"
     assert window._status_var.get() == "Search complete"
 
 
 @pytest.mark.parametrize(
-    ("exception", "message"),
+    ("exception_type", "error_detail", "message"),
     [
-        (ApiError("TVMaze is unavailable"), "TVMaze is unavailable"),
-        (RuntimeError("internal detail"), "Something went wrong"),
+        (ApiError, "TVMaze is unavailable", "TVMaze is unavailable"),
+        (RuntimeError, "internal detail", "Something went wrong"),
     ],
 )
-def test_search_errors_are_user_friendly(window, exception, message):
+def test_search_errors_are_user_friendly(
+    window, exception_type, error_detail, message
+):
     """Display errors without exposing unexpected exception internals."""
     class Service:
-        def search_shows(self, _search_term):
-            raise exception
+        provider_names = ("TVMaze",)
 
-    window._service = Service()
+        def create_criteria(self, source, media_type, search_term, minimum_rating):
+            return MediaSearchCriteria(source, media_type, search_term, minimum_rating)
+
+        def search_criteria(self, criteria):
+            raise exception_type(error_detail)
+
+        def top_movies(self, source):
+            return []
+
+    window._search_service = Service()
     window._search_var.set("Example")
     window._start_search()
-    window._worker_thread.join(timeout=2)
-    window._poll_search_result()
+    _finish_background_task(window)
 
     assert message in window._status_var.get()
-    if isinstance(exception, RuntimeError):
+    if exception_type is RuntimeError:
         assert "internal detail" not in window._status_var.get()
 
 
 def test_canvas_resize_updates_result_width_and_summary_wrap(window):
     """Keep summary text responsive as the application window is resized."""
-    window._render_results(
-        [Show(3, "Long Show", 7.0, (), "A summary", None)]
+    window._results_view.render(
+        [MediaItem("3", "Long Show", "show", "TVMaze", 7.0, overview="A summary")]
     )
 
     class Event:
         width = 520
 
-    window._on_canvas_resized(Event())
-    window._on_results_resized(None)
+    window._results_view._on_canvas_resized(Event())
+    window._results_view._on_content_resized(None)
 
-    assert window._summary_labels[0].cget("wraplength") == 450
-    assert window._canvas.cget("scrollregion")
+    assert window._results_view._summary_labels[0].cget("wraplength") == 450
+    assert window._results_view._canvas.cget("scrollregion")
 
 
 def test_launch_function_runs_the_desktop_event_loop(config, monkeypatch):
@@ -232,8 +288,8 @@ def test_launch_function_runs_the_desktop_event_loop(config, monkeypatch):
     launched = []
     monkeypatch.setattr("ui.show_finder_window.tk.Tk", lambda: root)
     class FakeWindow:
-        def __init__(self, root, config, logger):
-            launched.append((root, config, logger))
+        def __init__(self, root, config, logger, search_service):
+            launched.append((root, config, logger, search_service))
 
         def run(self):
             launched.append("run")
@@ -241,9 +297,22 @@ def test_launch_function_runs_the_desktop_event_loop(config, monkeypatch):
     monkeypatch.setattr("ui.show_finder_window.ShowFinderWindow", FakeWindow)
 
     logger = logging.getLogger("test.gui.launch")
-    launch_show_finder(config, logger)
+    search_service = MediaDiscoveryService(
+        providers={
+            "TVMaze": type(
+                "EmptyProvider",
+                (),
+                {
+                    "search": lambda self, term, media_type: [],
+                    "top_movies": lambda self, limit: [],
+                },
+            )()
+        },
+        config=config,
+    )
+    launch_show_finder(config, logger, search_service)
 
-    assert launched == [(root, config, logger), "run"]
+    assert launched == [(root, config, logger, search_service), "run"]
 
 
 def test_tk_runtime_paths_are_discovered(monkeypatch):
