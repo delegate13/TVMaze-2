@@ -1,0 +1,9 @@
+{
+  "api_base_url": "https://api.tvmaze.com/",
+  "search_path": "search/shows",
+  "timeout_seconds": 10,
+  "minimum_search_length": 2,
+  "rating_minimum": 0,
+  "rating_maximum": 10,
+  "log_level": "INFO"
+}
