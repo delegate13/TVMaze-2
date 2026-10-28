@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
+import sys
 import threading
 import tkinter as tk
 import webbrowser
 from collections.abc import Callable
-from tkinter import ttk
+from pathlib import Path
+from tkinter import messagebox, ttk
 
 from models.show import Show
 from services.configuration_service import ApplicationConfig
@@ -56,14 +59,170 @@ class ShowFinderWindow:
         self._root.title("TVMaze | Show Finder")
         self._root.geometry("980x760")
         self._root.minsize(680, 580)
+        self._root.resizable(True, True)
         self._root.configure(background=BACKGROUND)
         self._configure_styles()
+        self._build_menu_bar()
         self._build_layout()
         self._root.bind("<Return>", self._on_enter_pressed)
+        self._root.bind_all("<Control-n>", self._on_new_search_shortcut)
+        self._root.bind_all("<Control-f>", self._on_focus_search_shortcut)
+        self._root.bind_all("<Control-l>", self._on_clear_results_shortcut)
+        self._root.bind_all("<Control-a>", self._on_select_all_shortcut)
 
     def run(self) -> None:
         """Start the desktop application's event loop."""
         self._root.mainloop()
+
+    def _build_menu_bar(self) -> None:
+        """Create standard application menus and their keyboard accelerators."""
+        self._menu_bar = tk.Menu(self._root, tearoff=False)
+        self._root.configure(menu=self._menu_bar)
+
+        file_menu = tk.Menu(self._menu_bar, tearoff=False)
+        file_menu.add_command(
+            label="New Search",
+            accelerator="Ctrl+N",
+            command=self._new_search,
+        )
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", accelerator="Alt+F4", command=self._root.destroy)
+        self._menu_bar.add_cascade(label="File", menu=file_menu)
+
+        edit_menu = tk.Menu(self._menu_bar, tearoff=False)
+        edit_menu.add_command(
+            label="Cut",
+            accelerator="Ctrl+X",
+            command=lambda: self._edit_search_entry("<<Cut>>"),
+        )
+        edit_menu.add_command(
+            label="Copy",
+            accelerator="Ctrl+C",
+            command=lambda: self._edit_search_entry("<<Copy>>"),
+        )
+        edit_menu.add_command(
+            label="Paste",
+            accelerator="Ctrl+V",
+            command=lambda: self._edit_search_entry("<<Paste>>"),
+        )
+        edit_menu.add_separator()
+        edit_menu.add_command(
+            label="Select All",
+            accelerator="Ctrl+A",
+            command=self._select_all_search_text,
+        )
+        self._menu_bar.add_cascade(label="Edit", menu=edit_menu)
+
+        view_menu = tk.Menu(self._menu_bar, tearoff=False)
+        view_menu.add_command(
+            label="Clear Results",
+            accelerator="Ctrl+L",
+            command=self._clear_results_view,
+        )
+        view_menu.add_command(
+            label="Scroll to Top",
+            accelerator="Home",
+            command=lambda: self._canvas.yview_moveto(0),
+        )
+        view_menu.add_command(
+            label="Scroll to Bottom",
+            accelerator="End",
+            command=lambda: self._canvas.yview_moveto(1),
+        )
+        self._menu_bar.add_cascade(label="View", menu=view_menu)
+
+        navigate_menu = tk.Menu(self._menu_bar, tearoff=False)
+        navigate_menu.add_command(
+            label="Focus Search",
+            accelerator="Ctrl+F",
+            command=self._focus_search,
+        )
+        navigate_menu.add_command(
+            label="Search Shows",
+            accelerator="Enter",
+            command=self._start_search,
+        )
+        navigate_menu.add_command(
+            label="Previous Page",
+            accelerator="Page Up",
+            command=lambda: self._canvas.yview_scroll(-1, "pages"),
+        )
+        navigate_menu.add_command(
+            label="Next Page",
+            accelerator="Page Down",
+            command=lambda: self._canvas.yview_scroll(1, "pages"),
+        )
+        self._menu_bar.add_cascade(label="Navigate", menu=navigate_menu)
+
+        help_menu = tk.Menu(self._menu_bar, tearoff=False)
+        help_menu.add_command(
+            label="TVMaze Website",
+            command=lambda: webbrowser.open(self._config.api_base_url),
+        )
+        help_menu.add_command(label="About TVMaze Show Finder", command=self._show_about)
+        self._menu_bar.add_cascade(label="Help", menu=help_menu)
+
+    def _edit_search_entry(self, virtual_event: str) -> None:
+        """Apply a standard clipboard operation to the search field."""
+        self._search_entry.focus_set()
+        self._search_entry.event_generate(virtual_event)
+
+    def _select_all_search_text(self) -> None:
+        """Select all text in the search field and focus it."""
+        self._search_entry.focus_set()
+        self._search_entry.selection_range(0, tk.END)
+        self._search_entry.icursor(tk.END)
+
+    def _focus_search(self) -> None:
+        """Move keyboard focus to the show search field."""
+        self._search_entry.focus_set()
+
+    def _new_search(self) -> None:
+        """Reset the search controls and clear previously displayed shows."""
+        self._search_var.set("")
+        self._rating_var.set("Any rating")
+        self._clear_results_view()
+        self._set_status("Ready when you are.", MUTED)
+        self._focus_search()
+
+    def _clear_results_view(self) -> None:
+        """Clear displayed results without changing the current search text."""
+        self._clear_results()
+        self._count_var.set("")
+        self._show_empty_state(
+            "Start with a search",
+            "Type a show title or a couple of keywords above to get started.",
+        )
+
+    def _show_about(self) -> None:
+        """Display application information in a native dialog."""
+        messagebox.showinfo(
+            "About TVMaze Show Finder",
+            "TVMaze Show Finder\n"
+            "Discover television shows with ratings, genres, and summaries.\n\n"
+            "Show information is provided by TVMaze.",
+            parent=self._root,
+        )
+
+    def _on_new_search_shortcut(self, _event: tk.Event) -> str:
+        """Handle Ctrl+N to reset the search form."""
+        self._new_search()
+        return "break"
+
+    def _on_focus_search_shortcut(self, _event: tk.Event) -> str:
+        """Handle Ctrl+F to focus the search field."""
+        self._focus_search()
+        return "break"
+
+    def _on_clear_results_shortcut(self, _event: tk.Event) -> str:
+        """Handle Ctrl+L to clear displayed results."""
+        self._clear_results_view()
+        return "break"
+
+    def _on_select_all_shortcut(self, _event: tk.Event) -> str:
+        """Handle Ctrl+A by selecting the search text."""
+        self._select_all_search_text()
+        return "break"
 
     def _configure_styles(self) -> None:
         """Set a consistent, calm visual style for themed widgets."""
@@ -467,5 +626,30 @@ class ShowFinderWindow:
 
 def launch_show_finder(config: ApplicationConfig, logger: logging.Logger) -> None:
     """Create and display the desktop application window."""
+    _configure_tk_runtime()
     root = tk.Tk()
     ShowFinderWindow(root=root, config=config, logger=logger).run()
+
+
+def _configure_tk_runtime() -> None:
+    """Locate Tcl/Tk script libraries bundled alongside standard Python."""
+    install_tcl_directory = Path(sys.base_prefix) / "tcl"
+    runtime_libraries = (
+        ("TCL_LIBRARY", "init.tcl", "tcl8.*"),
+        ("TK_LIBRARY", "tk.tcl", "tk8.*"),
+    )
+    for environment_key, required_script, directory_pattern in runtime_libraries:
+        configured_path = os.environ.get(environment_key)
+        if configured_path and (Path(configured_path) / required_script).is_file():
+            continue
+
+        library_path = next(
+            (
+                candidate
+                for candidate in sorted(install_tcl_directory.glob(directory_pattern))
+                if (candidate / required_script).is_file()
+            ),
+            None,
+        )
+        if library_path is not None:
+            os.environ[environment_key] = str(library_path)

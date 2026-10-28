@@ -88,7 +88,9 @@ python main.py
 
 The desktop window opens by default. Search for a show, optionally choose a
 minimum rating, and press **Search shows** (or Enter). Results load in the
-background so the window remains responsive.
+background so the window remains responsive. The window can be resized, and
+its File, Edit, View, Navigate, and Help menus provide familiar actions and
+keyboard shortcuts.
 
 The command-line interface remains available:
 

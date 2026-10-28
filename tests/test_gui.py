@@ -1,13 +1,19 @@
 """Tests for the Tkinter desktop presentation layer."""
 
 import logging
+import os
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 
 from models.show import Show
 from services.configuration_service import ApplicationConfig
-from ui.show_finder_window import ShowFinderWindow, launch_show_finder
+from ui.show_finder_window import (
+    ShowFinderWindow,
+    _configure_tk_runtime,
+    launch_show_finder,
+)
 from utils.exceptions import ApiError
 
 
@@ -41,6 +47,7 @@ def config():
 @pytest.fixture
 def window(config):
     """Create a hidden desktop window so tests never disturb the user."""
+    _configure_tk_runtime()
     try:
         root = tk.Tk()
     except tk.TclError as error:
@@ -61,6 +68,46 @@ def test_window_has_friendly_initial_state(window):
     assert window._root.title() == "TVMaze | Show Finder"
     assert window._status_var.get() == "Ready when you are."
     assert window._results_frame.winfo_children()
+    assert tuple(window._root.resizable()) == (1, 1)
+
+
+def test_window_has_standard_menus(window):
+    """Provide familiar desktop menus and common actions."""
+    menu_bar = window._menu_bar
+
+    assert [
+        menu_bar.entrycget(index, "label")
+        for index in range(menu_bar.index("end") + 1)
+    ] == ["File", "Edit", "View", "Navigate", "Help"]
+
+
+def test_new_search_resets_controls_results_and_status(window):
+    """Reset the form and results from the File menu's new-search action."""
+    window._search_var.set("Example")
+    window._rating_var.set("8+")
+    window._count_var.set("3 shows")
+    window._render_results([Show(1, "Example", 8.0, (), None, None)])
+
+    window._new_search()
+
+    assert window._search_var.get() == ""
+    assert window._rating_var.get() == "Any rating"
+    assert window._count_var.get() == ""
+    assert window._status_var.get() == "Ready when you are."
+    assert "Start with a search" in _widget_text(window._results_frame)
+
+
+def test_clear_results_preserves_current_search(window):
+    """Clear the visible results while preserving the active search phrase."""
+    window._search_var.set("Example")
+    window._count_var.set("1 show")
+    window._render_results([Show(1, "Example", 8.0, (), None, None)])
+
+    window._clear_results_view()
+
+    assert window._search_var.get() == "Example"
+    assert window._count_var.get() == ""
+    assert "Start with a search" in _widget_text(window._results_frame)
 
 
 def test_enter_key_reports_short_search_term(window):
@@ -197,3 +244,14 @@ def test_launch_function_runs_the_desktop_event_loop(config, monkeypatch):
     launch_show_finder(config, logger)
 
     assert launched == [(root, config, logger), "run"]
+
+
+def test_tk_runtime_paths_are_discovered(monkeypatch):
+    """Resolve Tcl/Tk script paths shipped under the Python install prefix."""
+    monkeypatch.delenv("TCL_LIBRARY", raising=False)
+    monkeypatch.delenv("TK_LIBRARY", raising=False)
+
+    _configure_tk_runtime()
+
+    assert (Path(os.environ["TCL_LIBRARY"]) / "init.tcl").is_file()
+    assert (Path(os.environ["TK_LIBRARY"]) / "tk.tcl").is_file()
