@@ -4,39 +4,128 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="775fcdaf-7705-44ac-9ab8-3ef860d2d04e" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/TVMaze 2.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+    <list default="true" id="775fcdaf-7705-44ac-9ab8-3ef860d2d04e" name="Changes" comment="1st Commit">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="CopilotPersistence">
+    <persistenceIdMap>
+      <entry key="_C:/Users/Admin/PycharmProjects/TVMaze 2" value="3LJwrpDj3PlyHyeXUrZatk4t3Ss" />
+    </persistenceIdMap>
+  </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "delegate13"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/delegate13/TVMaze-2",
+    "accountId": "910e4c10-aee2-4584-8fed-a439cb47d130"
+  }
+}]]></component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0334929207042594" />
+      <entry key="MS500" value="1.507635747427105" />
+      <entry key="S2" value="2.0038553037169646" />
+      <entry key="S5" value="2.4148245704890234" />
+      <entry key="S10" value="2.6597851674398965" />
+      <entry key="S30" value="2.8737530583696116" />
+      <entry key="S60" value="2.935105318254281" />
+      <entry key="M2" value="2.9670963427765464" />
+      <entry key="M5" value="2.9867272435462366" />
+      <entry key="M10" value="2.9933449226667026" />
+      <entry key="M15" value="2.9955591152227754" />
+      <entry key="M30" value="2.9977774715272387" />
+      <entry key="H1" value="2.9988882137156687" />
+      <entry key="H2" value="2.999443976279924" />
+      <entry key="H4" value="2.9997219554872396" />
+      <entry key="D1" value="2.9999536547120735" />
+      <entry key="W1" value="2.9999933791334916" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.925210581206874" />
+      <entry key="MS500" value="1.4752513381713013" />
+      <entry key="S2" value="1.9930651993889583" />
+      <entry key="S5" value="2.409603501331007" />
+      <entry key="S10" value="2.656903934490541" />
+      <entry key="S30" value="2.872713726624104" />
+      <entry key="S60" value="2.9345743309166683" />
+      <entry key="M2" value="2.966827896904324" />
+      <entry key="M5" value="2.986619140497083" />
+      <entry key="M10" value="2.993290748986412" />
+      <entry key="M15" value="2.995522972187652" />
+      <entry key="M30" value="2.997759386359822" />
+      <entry key="H1" value="2.9988791677146653" />
+      <entry key="H2" value="2.999439452424493" />
+      <entry key="H4" value="2.999719693345717" />
+      <entry key="D1" value="2.9999532776587845" />
+      <entry key="W1" value="2.9999933252680084" />
+    </decayedShown>
   </component>
   <component name="ProjectColorInfo"><![CDATA[{
   "associatedIndex": 6,
   "fromUser": false
 }]]></component>
   <component name="ProjectId" id="3LJtANgZF3Qe4ymdxMRbNsXmFAJ" />
+  <component name="ProjectSessionTemplates">
+    <option name="panelTemplate">
+      <template>
+        <option name="modeId" value="Agent" />
+        <option name="model">
+          <model>
+            <option name="modelType" value="builtin_id" />
+            <option name="modelValue" value="auto" />
+          </model>
+        </option>
+        <option name="targetType" value="BACKGROUND" />
+        <option name="worktreeMode" value="WORKSPACE" />
+      </template>
+    </option>
+  </component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "copilot.chat.legacySessionMetadata.migrated": "true",
     "git-widget-placeholder": "master",
     "ignore.virus.scanning.warn.message": "true",
     "junie.onboarding.icon.badge.shown": "true",
@@ -63,12 +152,33 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1793183853669</updated>
-      <workItem from="1793183854781" duration="375000" />
+      <workItem from="1793183854781" duration="1859000" />
     </task>
+    <task id="LOCAL-00001" summary="1st Commit">
+      <option name="closed" value="true" />
+      <created>1793184349839</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1793184349839</updated>
+    </task>
+    <task id="LOCAL-00002" summary="1st Commit">
+      <option name="closed" value="true" />
+      <created>1793184393413</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1793184393413</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="1st Commit" />
+    <option name="LAST_COMMIT_MESSAGE" value="1st Commit" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
